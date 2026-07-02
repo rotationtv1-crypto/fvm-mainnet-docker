@@ -1,0 +1,14 @@
+# cloudflared tunnel configuration
+#
+# Replace <TUNNEL_ID> with the ID printed by `cloudflared tunnel create ecosystem-tunnel`.
+# The credentials file is written to ~/.cloudflared/<TUNNEL_ID>.json during creation.
+#
+# WebSocket upgrades are proxied transparently by cloudflared, so no extra
+# settings are needed to carry the live data-swap connection over the tunnel.
+tunnel: <TUNNEL_ID>
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: connect.yourdomain.com
+    service: http://localhost:3000
+  - service: http_status:404
