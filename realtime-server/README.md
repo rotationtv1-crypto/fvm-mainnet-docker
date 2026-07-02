@@ -33,11 +33,22 @@ fresh vulnerability metrics to every active client — no polling required.
 
 ```bash
 cd realtime-server
-npm install          # installs express + ws
-npm start            # → 📡 Communication matrix active on port 3000
+npm install                       # installs express + ws
+WEBHOOK_SECRET=dev-secret npm start   # → 📡 Communication matrix active on port 3000
 ```
 
 Health check: `GET /healthz` returns `{ "status": "ok", "clients": <n> }`.
+
+## Configuration
+
+| Variable         | Required | Purpose                                                                 |
+| ---------------- | -------- | ----------------------------------------------------------------------- |
+| `PORT`           | No       | Listen port (default `3000`).                                           |
+| `WEBHOOK_SECRET` | Yes      | Shared secret for the scan-complete webhook. Until set, the webhook rejects every request with `503`. |
+
+Set `WEBHOOK_SECRET` as a Railway variable, a systemd `Environment=` line, or a
+`docker run -e WEBHOOK_SECRET=…` flag. The WebSocket stream itself is read-only
+for clients, so only the inbound webhook is authenticated.
 
 ## Build & run with Docker
 
@@ -50,11 +61,14 @@ docker run -p 3000:3000 fvm-realtime-server
 ## Push a scan update
 
 Wire this into your Docker build pipeline as the final step after Trivy
-completes. Example payload:
+completes. The request must carry the shared secret in either an
+`X-Webhook-Secret` header or an `Authorization: Bearer <secret>` header.
+Example payload:
 
 ```bash
 curl -X POST http://localhost:3000/api/webhook/scan-complete \
   -H 'Content-Type: application/json' \
+  -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
   -d '{
     "image_version": "lotus:v1.33.0",
     "distribution": "debian 12",

@@ -4,10 +4,50 @@
 // vulnerability metrics to every active client instantly.
 const express = require('express');
 const http = require('http');
+const crypto = require('crypto');
 const WebSocket = require('ws');
 
 const app = express();
 app.use(express.json());
+
+// Shared secret used to authenticate the scan-complete webhook. Set it in the
+// environment (e.g. Railway variables or the systemd unit running cloudflared).
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+if (!WEBHOOK_SECRET) {
+  console.warn(
+    '⚠️  WEBHOOK_SECRET is not set — /api/webhook/scan-complete will reject all requests until it is configured.'
+  );
+}
+
+// Timing-safe comparison so a token check does not leak length/content via
+// response timing. Returns false for any mismatch or missing value.
+function isValidSecret(provided) {
+  if (!WEBHOOK_SECRET || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(WEBHOOK_SECRET);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+// Extract the presented secret from either `X-Webhook-Secret` or a
+// `Authorization: Bearer <token>` header.
+function extractSecret(req) {
+  const header = req.get('x-webhook-secret');
+  if (header) return header;
+  const auth = req.get('authorization') || '';
+  const match = auth.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1] : '';
+}
+
+function authenticateWebhook(req, res, next) {
+  if (!WEBHOOK_SECRET) {
+    return res.status(503).json({ error: 'Webhook authentication is not configured' });
+  }
+  if (!isValidSecret(extractSecret(req))) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  return next();
+}
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
@@ -63,8 +103,9 @@ app.get('/healthz', (_req, res) => {
   res.status(200).json({ status: 'ok', clients: connectedClients.size });
 });
 
-// Endpoint triggered by your Docker build pipeline when a scan finishes
-app.post('/api/webhook/scan-complete', (req, res) => {
+// Endpoint triggered by your Docker build pipeline when a scan finishes.
+// Requires a valid shared secret (see authenticateWebhook).
+app.post('/api/webhook/scan-complete', authenticateWebhook, (req, res) => {
   const scanData = req.body;
   console.log(`🚀 Broadcasting new scan data for: ${scanData.image_version}`);
 
